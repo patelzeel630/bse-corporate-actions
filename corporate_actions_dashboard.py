@@ -1,9 +1,9 @@
 import streamlit as st
 import pandas as pd
 import requests
+from bs4 import BeautifulSoup
 
 # -------------------- Company List --------------------
-# You can extend this dictionary with more companies
 COMPANIES = {
     "Reliance Industries": "500325",
     "State Bank of India": "500112",
@@ -12,24 +12,32 @@ COMPANIES = {
     "HDFC Bank": "500180",
 }
 
-# -------------------- Fetch corporate actions from BSE --------------------
+# -------------------- Scraper from BSE Website --------------------
 def fetch_corporate_actions(company_code):
-    """
-    Fetches corporate actions for a given company from BSE.
-    """
-    url = f"https://api.bseindia.com/BseIndiaAPI/api/CorporateAction/w?Debtflag=&strSearch={company_code}&strType=C"
+    url = f"https://www.bseindia.com/corporates/corpInfo.aspx?scripcd={company_code}&rtype=corporateactions"
     try:
         response = requests.get(url, headers={"User-Agent": "Mozilla/5.0"})
-        if response.status_code == 200:
-            data = response.json()
-            if "Table" in data and len(data["Table"]) > 0:
-                df = pd.DataFrame(data["Table"])
-                return df
-            else:
-                return pd.DataFrame()
-        else:
-            st.error(f"❌ Failed to fetch data from BSE (Status {response.status_code})")
+        if response.status_code != 200:
+            st.error(f"❌ Failed to fetch data (Status {response.status_code})")
             return pd.DataFrame()
+
+        soup = BeautifulSoup(response.text, "html.parser")
+        table = soup.find("table", {"id": "ctl00_ContentPlaceHolder1_gvData"})
+
+        if table is None:
+            return pd.DataFrame()
+
+        # Extract table rows
+        rows = []
+        headers = [th.text.strip() for th in table.find_all("th")]
+        for tr in table.find_all("tr")[1:]:
+            cells = [td.text.strip() for td in tr.find_all("td")]
+            if cells:
+                rows.append(cells)
+
+        df = pd.DataFrame(rows, columns=headers)
+        return df
+
     except Exception as e:
         st.error(f"⚠️ Error fetching data: {e}")
         return pd.DataFrame()
@@ -38,11 +46,11 @@ def fetch_corporate_actions(company_code):
 st.set_page_config(page_title="Corporate Actions Dashboard", layout="wide")
 st.title("📊 Corporate Actions Viewer (BSE Live Data)")
 
-# Select company from dropdown
+# Select company
 company_name = st.selectbox("🏢 Select a company:", list(COMPANIES.keys()))
 company_code = COMPANIES[company_name]
 
-# Fetch data
+# Fetch and display
 df = fetch_corporate_actions(company_code)
 
 if df.empty:
@@ -51,7 +59,7 @@ else:
     st.success(f"✅ Found {len(df)} corporate actions for {company_name}.")
     st.dataframe(df)
 
-    # If EX DATE exists, allow date filtering
+    # Filter by Ex Date if present
     if "Ex Date" in df.columns:
         df["Ex Date"] = pd.to_datetime(df["Ex Date"], errors="coerce")
         min_date = df["Ex Date"].min()
@@ -69,5 +77,3 @@ else:
 
         st.write("### 🔎 Filtered Corporate Actions")
         st.dataframe(filtered_df)
-    else:
-        st.warning("⚠️ 'Ex Date' column not found in BSE data.")
