@@ -12,9 +12,9 @@ COMPANIES = {
     "HDFC Bank": "500180",
 }
 
-# -------------------- Scraper from BSE Website --------------------
+# -------------------- Scraper from BSE Announcements --------------------
 def fetch_corporate_actions(company_code):
-    url = f"https://www.bseindia.com/corporates/corpInfo.aspx?scripcd={company_code}&rtype=corporateactions"
+    url = f"https://www.bseindia.com/corporates/ann.aspx?ann_flag=C&SecurityCode={company_code}&curpg=1&ann=True"
     try:
         response = requests.get(url, headers={"User-Agent": "Mozilla/5.0"})
         if response.status_code != 200:
@@ -27,9 +27,11 @@ def fetch_corporate_actions(company_code):
         if table is None:
             return pd.DataFrame()
 
-        # Extract table rows
-        rows = []
+        # Extract headers
         headers = [th.text.strip() for th in table.find_all("th")]
+
+        # Extract rows
+        rows = []
         for tr in table.find_all("tr")[1:]:
             cells = [td.text.strip() for td in tr.find_all("td")]
             if cells:
@@ -59,11 +61,11 @@ else:
     st.success(f"✅ Found {len(df)} corporate actions for {company_name}.")
     st.dataframe(df)
 
-    # Filter by Ex Date if present
-    if "Ex Date" in df.columns:
-        df["Ex Date"] = pd.to_datetime(df["Ex Date"], errors="coerce")
-        min_date = df["Ex Date"].min()
-        max_date = df["Ex Date"].max()
+    # Filter by date if column present
+    if "Date" in df.columns:
+        df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
+        min_date = df["Date"].min()
+        max_date = df["Date"].max()
 
         start_date, end_date = st.date_input(
             "📅 Select date range:",
@@ -72,8 +74,16 @@ else:
             max_value=max_date,
         )
 
-        mask = (df["Ex Date"] >= pd.to_datetime(start_date)) & (df["Ex Date"] <= pd.to_datetime(end_date))
+        mask = (df["Date"] >= pd.to_datetime(start_date)) & (df["Date"] <= pd.to_datetime(end_date))
         filtered_df = df.loc[mask]
 
         st.write("### 🔎 Filtered Corporate Actions")
         st.dataframe(filtered_df)
+
+        # Download button
+        st.download_button(
+            "⬇️ Download Filtered Data (CSV)",
+            data=filtered_df.to_csv(index=False).encode("utf-8"),
+            file_name=f"{company_name}_corporate_actions.csv",
+            mime="text/csv"
+        )
