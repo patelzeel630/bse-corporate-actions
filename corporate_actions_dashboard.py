@@ -1,60 +1,109 @@
-import requests
-import pandas as pd
 import streamlit as st
-from datetime import datetime
+import requests
+from bs4 import BeautifulSoup
+import pandas as pd
+from datetime import datetime, timedelta
 
-# ✅ Mapping: Company name -> BSE Scrip Code
-COMPANIES = {
-    "Cera Sanitaryware": "532443",    # CERA
-    "Hindware Home Innovation": "543518", # Hindware
-    "Kajaria Ceramics": "500233"     # Kajaria
-}
+st.set_page_config(page_title="BSE Corporate Actions", layout="wide")
 
-def fetch_announcements(scrip_code, company_name):
-    url = f"https://api.bseindia.com/BseIndiaAPI/api/AnnGetData/w?strCat=-1&strPrevDate=&strScrip={scrip_code}&strSearch=&strToDate=&strType=C"
-    r = requests.get(url, headers={"User-Agent": "Mozilla/5.0"})
-    data = r.json()
+st.title("📊 BSE Corporate Action Dashboard")
 
+@st.cache_data
+def load_company_list():
+    url = "https://www.bseindia.com/download/BhavCopy/Equity/EQ_ISINCODE.csv"
+    df = pd.read_csv(url)
+    df = df[["SC_CODE", "SC_NAME"]]
+    df["SC_NAME"] = df["SC_NAME"].str.strip()
+    return df
+
+def fetch_announcements(scrip_code):
+    url = f"https://www.bseindia.com/corporates/ann.aspx?scrip={scrip_code}&dur=A&expandable=0"
+    headers = {"User-Agent": "Mozilla/5.0"}
+    response = requests.get(url, headers=headers)
+    
+    if response.status_code != 200:
+        return []
+    
+    soup = BeautifulSoup(response.text, "html.parser")
+    table = soup.find("table", {"id": "ctl00_ContentPlaceHolder1_gvData"})
+    
     announcements = []
-    for item in data.get("Table", []):
-        announcements.append({
-            "Company": company_name,
-            "Scrip Code": scrip_code,
-            "Date": item.get("News_dt"),
-            "Corporate Action": item.get("Newssub"),
-            "Details": item.get("news_detl"),
-            "PDF Link": "https://www.bseindia.com" + item.get("ATTACHMENTNAME", "")
-        })
+    if table:
+        rows = table.find_all("tr")[1:]  # skip header
+        for row in rows:
+            cols = row.find_all("td")
+            if len(cols) >= 3:
+                date = cols[0].text.strip()
+                description = cols[1].text.strip()
+                attachment = cols[2].text.strip()
+                announcements.append({
+                    "Date": date,
+                    "Description": description,
+                    "Attachment": attachment
+                })
     return announcements
 
-def main():
-    st.set_page_config(page_title="BSE Corporate Actions", layout="wide")
-    st.title("📊 Corporate Action Dashboard (BSE)")
+# Load company list
+company_df = load_company_list()
 
-    all_announcements = []
-    for company, code in COMPANIES.items():
-        try:
-            all_announcements.extend(fetch_announcements(code, company))
-        except Exception as e:
-            st.error(f"Error fetching {company}: {e}")
+# Search box
+search_term = st.text_input("🔎 Search company name").upper().strip()
+if search_term:
+    filtered_df = company_df[company_df["SC_NAME"].str.contains(search_term, case=False)]
+else:
+    filtered_df = company_df.head(20)  # show only first 20 if nothing typed
 
-    if not all_announcements:
-        st.warning("No announcements found.")
-        return
+company_name = st.selectbox(
+    "Select Company",
+    filtered_df["SC_NAME"].tolist()
+)
 
-    df = pd.DataFrame(all_announcements)
+# Date range filter
+time_filter = st.selectbox(
+    "Select Time Period",
+    ["All", "Last 1 Month", "Last 3 Months", "Last 6 Months", "Last 1 Year"]
+)
 
-    # Filters
-    company_filter = st.multiselect("Select Companies", df["Company"].unique(), df["Company"].unique())
-    filtered_df = df[df["Company"].isin(company_filter)]
-
-    st.dataframe(filtered_df, use_container_width=True)
-
-    # Download as Excel
-    if st.button("Export to Excel"):
-        filename = f"Corporate_Actions_{datetime.today().strftime('%Y%m%d')}.xlsx"
-        filtered_df.to_excel(filename, index=False)
-        st.success(f"✅ Exported to {filename}")
-
-if __name__ == "__main__":
-    main()
+if company_name:
+    scrip_code = company_df.loc[company_df["SC_NAME"] == company_name, "SC_CODE"].values[0]
+    
+    announcements = fetch_announcements(scrip_code)
+    
+    if announcements:
+        df = pd.DataFrame(announcements)
+        
+        # Convert Date column
+        df["Date"] = pd.to_datetime(df["Date"], errors="coerce", dayfirst=True)
+        
+        # Apply filter
+        today = datetime.today()
+        if time_filter == "Last 1 Month":
+            cutoff = today - timedelta(days=30)
+            df = df[df["Date"] >= cutoff]
+        elif time_filter == "Last 3 Months":
+            cutoff = today - timedelta(days=90)
+            df = df[df["Date"] >= cutoff]
+        elif time_filter == "Last 6 Months":
+            cutoff = today - timedelta(days=180)
+            df = df[df["Date"] >= cutoff]
+        elif time_filter == "Last 1 Year":
+            cutoff = today - timedelta(days=365)
+            df = df[df["Date"] >= cutoff]
+        
+        # Show table
+        st.dataframe(df, use_container_width=True)
+        
+        if not df.empty:
+            # Download option
+            csv = df.to_csv(index=False).encode("utf-8")
+            st.download_button(
+                "📥 Download Announcements as CSV",
+                csv,
+                f"{company_name}_corporate_actions.csv",
+                "text/csv",
+                key="download-csv"
+            )
+        else:
+            st.warning("No announcements found in this period.")
+    else:
+        st.warning(f"No announcements found for {company_name}.")

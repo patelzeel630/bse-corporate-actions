@@ -1,4 +1,7 @@
 # BSE Corporate Actions Dashboard
 
-This Streamlit app fetches corporate action announcements (Dividends, Bonus, Buyback, etc.) 
-from BSE India for selected companies (Cera, Hindware, Kajaria) and allows export to Excel.
+This Streamlit app fetches and displays corporate action announcements from BSE India.  
+Features:
+- Search companies from BSE
+- Filter announcements by time period
+- Download results to CSV
